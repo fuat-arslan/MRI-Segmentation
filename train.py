@@ -10,10 +10,10 @@ warnings.filterwarnings("ignore")
 
 from data_loading.data_module import DataModule
 
-from DL_Project_Generic.loss import compute_loss, LossBraTS
-from DL_Project_Generic.wrappers import trainer
-from DL_Project_Generic.networks import U_Net
-from DL_Project_Generic.utils import add_config, get_activation_function, print_activation_functions
+from net.loss import compute_loss, LossBraTS
+from net.wrappers import trainer
+from net.networks import U_Net
+from net.utils import add_config, get_activation_function, print_activation_functions
 
 
 
