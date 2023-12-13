@@ -1,0 +1,17 @@
+model_name: "my_model"
+model_type: "unet"
+dimension: 2
+in_channels: 4
+out_channels: 4
+kernels: [64, 128, 256]
+batch_size: 4
+epochs: 2
+learning_rate: 0.0002
+deep_supervision: False
+instance_norm: False
+activation: "ReLU"
+focal: False
+device: "cuda:0"
+weight_decay: 0
+results_dir: "results2"
+overwrite: False
