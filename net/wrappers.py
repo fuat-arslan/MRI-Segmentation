@@ -1,17 +1,18 @@
 import torch
 import os
 from tqdm import tqdm
-from DL_Project_Generic.loss import DiceCoeff, LossBraTS, compute_loss
+from net.loss import DiceCoeff, LossBraTS, compute_loss
 import matplotlib.pyplot as plt
 
 
 
 def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
-             best_model_path='DL_results', dim3d=False, deep_supervision=False, device='cuda:0'):
+             best_model_path='DL_results', dim3d=False, deep_supervision=False, device='cuda:0', delete_previous_best=True):
 
 
     best_val_loss = float('inf')  # Initialize with a high value
     best_epoch = -1
+    best_model_filename = ""
     scaler = torch.cuda.amp.GradScaler()
     train_loss_list = []
     val_loss_list = []
@@ -80,8 +81,8 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
         val_loss = 0.0
         val_samples = 0
         val_dice_0 = 0.0
-        val_dice_0 = 0.0
-        val_dice_0 = 0.0
+        val_dice_1 = 0.0
+        val_dice_2 = 0.0
         
 
         with torch.no_grad():
@@ -92,7 +93,7 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                     with torch.cuda.amp.autocast():
                         val_outputs = model(val_images)
                         val_loss_batch = compute_loss(val_outputs, val_labels, criterion, deep_supervision)
-                        val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs, val_labels)
+                        val_dice_cal0, val_dice_cal1, val_dice_cal2 = compute_loss(val_outputs, val_labels, DiceCoeff(), deep_supervision)
 
                     val_loss += val_loss_batch.item() * val_images.size(0)
                     val_samples += val_images.size(0)
@@ -108,7 +109,7 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                         with torch.cuda.amp.autocast():
                             val_outputs = model(val_images)
                             val_loss_batch = compute_loss(val_outputs, val_labels, criterion, deep_supervision)
-                            val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs, val_labels)
+                            val_dice_cal0, val_dice_cal1, val_dice_cal2 = compute_loss(val_outputs, val_labels, DiceCoeff(), deep_supervision)
 
 
                         val_loss += val_loss_batch.item() * val_images.size(0)
@@ -134,7 +135,12 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
             best_epoch = epoch + 1
             torch.save(model.state_dict(), os.path.join(best_model_path, f"best_model_{epoch + 1}_loss_{best_val_loss:.4f}.pth"))
             print(f"Model saved at Epoch {best_epoch} with Validation Loss: {best_val_loss:.4f}")
-        
+            # Delete the previous best model if it exists
+            if best_model_filename and os.path.exists(best_model_filename) and delete_previous_best:
+                os.remove(best_model_filename)
+                print(f"Deleted previous best model: {best_model_filename}")
+            best_model_filename = os.path.join(best_model_path, f"best_model_{epoch + 1}_loss_{best_val_loss:.4f}.pth")
+
 
     print(f"Training completed. Best Validation Loss: {best_val_loss:.4f} at Epoch {best_epoch}")
     return {'model': model, 'train_loss': train_loss_list, 'val_loss': val_loss_list,
@@ -158,7 +164,7 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
                 with torch.cuda.amp.autocast():
                     test_outputs = model(test_images)
                     test_loss_batch = compute_loss(test_outputs, test_labels, criterion, deep_supervision)
-                    test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs, test_labels)
+                    test_dice_cal0, test_dice_cal1, test_dice_cal2 = compute_loss(test_outputs, test_labels, DiceCoeff(), deep_supervision)
 
                 test_loss += test_loss_batch.item() * test_images.size(0)
                 test_samples += test_images.size(0)
@@ -174,7 +180,7 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
                     with torch.cuda.amp.autocast():
                         test_outputs = model(test_images)
                         test_loss_batch = compute_loss(test_outputs, test_labels, criterion, deep_supervision)
-                        test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs, test_labels)
+                        test_dice_cal0, test_dice_cal1, test_dice_cal2 = compute_loss(test_outputs, test_labels, DiceCoeff(), deep_supervision)
 
                     test_loss += test_loss_batch.item() * test_images.size(0)
                     test_samples += test_images.size(0)

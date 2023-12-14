@@ -122,8 +122,12 @@ class Attention_block3d(nn.Module):
         return x * psi
 
 class U_Net(nn.Module):
-    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, kernels=(64, 128, 256, 512, 1024), inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
+    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, kernels=(64, 128, 256, 512, 1024), inst=True, act=nn.LeakyReLU(0.2, inplace=True), deep_supervision=False, n_ds=2):
         super(U_Net, self).__init__()
+
+        self.spat_dim = spat_dim
+        self.deep_supervision = deep_supervision
+        self.n_ds = n_ds
 
         if spat_dim == 2:
             conv_block_class = conv_block
@@ -150,9 +154,18 @@ class U_Net(nn.Module):
         # Create decoder layers
         for i in range(len(kernels) - 1, 0, -1):
             self.up_layers.append(up_conv_class(kernels[i], kernels[i - 1], inst=inst, act=act))
-            self.decoder_convs.append(conv_block_class(kernels[i], kernels[i - 1], inst=inst, act=act))
+            self.decoder_convs.append(conv_block_class(kernels[i-1]*2, kernels[i - 1], inst=inst, act=act))
 
         self.max_pool = max_pool
+
+        if self.deep_supervision:
+            self.dsv_layers = nn.ModuleList()
+            for i in reversed(range(self.n_ds)):
+                if self.spat_dim == 2:
+                    self.dsv_layers.append(nn.Conv2d(kernels[i], output_ch, kernel_size=1))
+                elif self.spat_dim == 3:
+                    self.dsv_layers.append(nn.Conv3d(kernels[i], output_ch, kernel_size=1))
+
 
     def forward(self, x):
         enc_outputs = []
@@ -164,10 +177,24 @@ class U_Net(nn.Module):
                 x = self.max_pool(x)
 
         # Decoding path
+        dsv_outputs = []
         for i, (up, dec_conv) in enumerate(zip(self.up_layers, self.decoder_convs)):
             x = up(x)
             x = torch.cat((enc_outputs[-(i + 2)], x), dim=1)
             x = dec_conv(x)
+            if self.deep_supervision and i > (len(self.up_layers) - 1 - self.n_ds):
+                dsv_outputs.append(self.dsv_layers[i-len(self.up_layers)+self.n_ds](x))
+
+        d1 = self.Conv_1x1(x)
+        if self.deep_supervision:
+            dsv_outs = [d1,]
+            for dsv_out in dsv_outputs:
+                if self.spat_dim == 3:
+                    dsv_outs.append(nn.functional.interpolate(dsv_out, d1.shape[2:], mode="trilinear", align_corners=True))
+                elif self.spat_dim == 2:
+                    dsv_outs.append(nn.functional.interpolate(dsv_out, d1.shape[2:], mode="bilinear", align_corners=True))
+            return dsv_outs
+
 
         d1 = self.Conv_1x1(x)
         return d1
@@ -210,7 +237,7 @@ class AttU_Net(nn.Module):
         # Create decoder layers and up layers
         for i in range(len(kernels) - 1, 0, -1):
             self.up_layers.append(up_conv_class(kernels[i], kernels[i - 1], inst=inst, act=act))
-            self.decoder_convs.append(conv_block_class(kernels[i], kernels[i - 1], inst=inst, act=act))
+            self.decoder_convs.append(conv_block_class(kernels[i-1]*2, kernels[i - 1], inst=inst, act=act))
 
         self.max_pool = max_pool
         self.sigmoid = nn.Sigmoid()
@@ -241,7 +268,6 @@ class AttU_Net(nn.Module):
             x = torch.cat((enc_outputs[-(i + 2)], x), dim=1)
             x = dec_conv(x)
             if self.deep_supervision and i > (len(self.up_layers) - 1 - self.n_ds):
-                print("dsv yeah", i, len(self.up_layers) - 1 - self.n_ds, x.shape)
                 dsv_outputs.append(self.dsv_layers[i-len(self.up_layers)+self.n_ds](x))
 
         d1 = self.Conv_1x1(x)

@@ -11,6 +11,7 @@ def add_config(config_path, args):
     config = read_config(config_path)
     # add configs to args.model_params
     args.model_params = Namespace(**config)
+    args.batch_size = args.model_params.batch_size
     return args
 
 
