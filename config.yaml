@@ -12,8 +12,13 @@ deep_supervision_head: 2
 instance_norm: True
 activation: "leakyrelu"
 focal: True
-device: "cuda:0"
+device: "cuda:1"
 weight_decay: 0
 results_dir: "results2"
-overwrite: False
-delete_prev_ckpts: False
+overwrite: True
+delete_prev_ckpts: True
+data_path: '/auto/data2/myilmaz/DL_Project/BraTS2021_Preprocessed/11_3d_2'
+brats: True
+fold: 0
+task: 11
+num_workers: 16

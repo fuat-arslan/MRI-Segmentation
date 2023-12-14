@@ -12,6 +12,11 @@ def add_config(config_path, args):
     # add configs to args.model_params
     args.model_params = Namespace(**config)
     args.batch_size = args.model_params.batch_size
+    args.data = args.model_params.data_path
+    args.brats = args.model_params.brats
+    args.fold = args.model_params.fold
+    args.task = args.model_params.task
+    args.num_workers = args.model_params.num_workers
     return args
 
 

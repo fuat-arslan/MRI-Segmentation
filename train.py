@@ -31,7 +31,7 @@ def train(args,model_path):
     device = torch.device(args.model_params.device)
     deep_supervision=args.model_params.deep_supervision
     # activation = generate_activation_function(args.model_params.activation)
-    activation = nn.ReLU() if args.model_params.activation == "relu" else nn.LeakyReLU(0.2, inplace=True)
+    activation = nn.ReLU() if args.model_params.activation == "relu" else nn.LeakyReLU(0.02, inplace=False)
 
     #Get model from args
     model_class = U_Net if args.model_params.model_name == "unet" else AttU_Net
