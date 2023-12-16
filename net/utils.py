@@ -8,15 +8,27 @@ def read_config(config_file):
     return config
 
 def add_config(config_path, args):
+    """
+    Add configs from yaml file to args.model_params
+    """
     config = read_config(config_path)
     # add configs to args.model_params
     args.model_params = Namespace(**config)
+    args.batch_size = args.model_params.batch_size
+    args.data = args.model_params.data
+    args.brats = args.model_params.brats
+    args.fold = args.model_params.fold
+    args.gpus = args.model_params.gpus
+    args.task = args.model_params.task
+    args.num_workers = args.model_params.num_workers
+    args.nfolds = args.model_params.nfolds
     return args
-
-
     
 
 def get_activation_function(activation_name, *args, **kwargs):
+    """
+    Get activation function from torch.nn module
+    """
     try:
         activation_function = getattr(nn, activation_name)(*args, **kwargs)
         if isinstance(activation_function, nn.Module):

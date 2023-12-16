@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This code is adapted from:
+https://github.com/NVIDIA/DeepLearningExamples/blob/master/PyTorch/Segmentation/nnUNet/utils/args.py
+"""
+
 import json
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser, Namespace
 

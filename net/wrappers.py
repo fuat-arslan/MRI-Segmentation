@@ -1,15 +1,35 @@
 import torch
 import os
+import numpy as np
 from tqdm import tqdm
-from DL_Project_Generic.loss import DiceCoeff, LossBraTS, compute_loss
+from scipy.io import savemat, loadmat
+from net.loss import DiceCoeff, LossBraTS, compute_loss
 import matplotlib.pyplot as plt
 
-
-
 def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
-             best_model_path='DL_results', dim3d=False, deep_supervision=False, device='cuda:0'):
+             best_model_path='DL_results', dim3d=False, deep_supervision=False, device='cuda:0', amp=True):
+    
+    """
+    Function to train the model for num_epochs epochs.
+    inputs:
+        num_epochs: Number of epochs to train the model for
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        model: The model to be trained
+        optimizer: Optimizer to use for training
+        criterion: Loss function
+        best_model_path: Path to save the best model
+        dim3d: If True, train in 3D, else train in 2D
+        deep_supervision: If True, use deep supervision
+        device: Device to use for training
+        amp: If True, use automatic mixed precision
+    outputs:
+        A dictionary containing the model, training loss, validation loss, best epoch, best validation loss and optimizer state dict
 
+    It saves the best model in the best_model_path directory.
+    """
 
+    best_model_save_path = ""
     best_val_loss = float('inf')  # Initialize with a high value
     best_epoch = -1
     scaler = torch.cuda.amp.GradScaler()
@@ -36,7 +56,6 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
 
                 with torch.cuda.amp.autocast():
                     outputs = model(images)
-                    # print(outputs.shape, labels.shape)
                     loss = compute_loss(outputs, labels, criterion, deep_supervision)
 
                 scaler.scale(loss).backward()
@@ -56,7 +75,7 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
 
                     optimizer.zero_grad()
 
-                    with torch.cuda.amp.autocast():
+                    with torch.cuda.amp.autocast(enabled=amp):
                         outputs = model(images)
                         loss = compute_loss(outputs, labels, criterion, deep_supervision)
 
@@ -80,8 +99,8 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
         val_loss = 0.0
         val_samples = 0
         val_dice_0 = 0.0
-        val_dice_0 = 0.0
-        val_dice_0 = 0.0
+        val_dice_1 = 0.0
+        val_dice_2 = 0.0
         
 
         with torch.no_grad():
@@ -92,7 +111,7 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                     with torch.cuda.amp.autocast():
                         val_outputs = model(val_images)
                         val_loss_batch = compute_loss(val_outputs, val_labels, criterion, deep_supervision)
-                        val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs, val_labels)
+                        val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs[0] if deep_supervision else val_outputs, val_labels)
 
                     val_loss += val_loss_batch.item() * val_images.size(0)
                     val_samples += val_images.size(0)
@@ -105,10 +124,10 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                         img2d, label2d = val_batch['image'][:,:,idx], val_batch['label'][:,:,idx]
                         val_images, val_labels = img2d.float().to(device), label2d.to(device)
 
-                        with torch.cuda.amp.autocast():
+                        with torch.cuda.amp.autocast(enabled=amp):
                             val_outputs = model(val_images)
                             val_loss_batch = compute_loss(val_outputs, val_labels, criterion, deep_supervision)
-                            val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs, val_labels)
+                            val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs[0] if deep_supervision else val_outputs, val_labels)
 
 
                         val_loss += val_loss_batch.item() * val_images.size(0)
@@ -133,6 +152,9 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
             best_val_loss = val_loss
             best_epoch = epoch + 1
             torch.save(model.state_dict(), os.path.join(best_model_path, f"best_model_{epoch + 1}_loss_{best_val_loss:.4f}.pth"))
+            if os.path.exists(best_model_save_path):
+                os.remove(best_model_save_path)
+            best_model_save_path = os.path.join(best_model_path, f"best_model_{epoch + 1}_loss_{best_val_loss:.4f}.pth")
             print(f"Model saved at Epoch {best_epoch} with Validation Loss: {best_val_loss:.4f}")
         
 
@@ -141,7 +163,22 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
              'best_epoch': best_epoch, 'best_val_loss': best_val_loss, 'optimizer': optimizer,
                'val_dice_0': val_dice_0_list, 'val_dice_1': val_dice_1_list, 'val_dice_2': val_dice_2_list}
      
-def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_supervision=False):
+def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_supervision=False, save_path="results2"):
+    """
+    Function to test the model.
+    inputs:
+        test_loader: Test data loader
+        model: The model to be tested
+        criterion: Loss function
+        device: Device to use for testing
+        dim3d: If True, test in 3D, else test in 2D
+        deep_supervision: If True, use deep supervision
+        save_path: Path to save the output
+    outputs:
+        A dictionary containing the test loss, test dice 0, test dice 1, test dice 2
+
+    It saves the output in the save_path directory as a .mat file.
+    """
     model.eval()
     test_loss = 0.0
     test_samples = 0
@@ -149,7 +186,12 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
     test_dice_1 = 0.0
     test_dice_2 = 0.0
 
-
+    all_test_images = []
+    all_test_labels = []
+    all_test_outputs = []
+    
+    ds_outputs = []
+    
     with torch.no_grad():
         for batch_idx, (test_batch) in enumerate(tqdm(test_loader, desc=f"Testing")):
             if dim3d:
@@ -158,13 +200,23 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
                 with torch.cuda.amp.autocast():
                     test_outputs = model(test_images)
                     test_loss_batch = compute_loss(test_outputs, test_labels, criterion, deep_supervision)
-                    test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs, test_labels)
+                    test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs[0] if deep_supervision else test_outputs, test_labels)
+
+                all_test_images.append(test_images.cpu().numpy())
+                all_test_labels.append(test_labels.cpu().numpy())
+                temp = test_outputs[0] if deep_supervision else test_outputs
+                all_test_outputs.append(temp.cpu().numpy()) 
+                
+                if deep_supervision:
+                    print(type(test_outputs))
+                    ds_outputs.append([out.cpu().numpy() for out in test_outputs])
 
                 test_loss += test_loss_batch.item() * test_images.size(0)
                 test_samples += test_images.size(0)
                 test_dice_0 += test_dice_cal0.item() * test_images.size(0)
                 test_dice_1 += test_dice_cal1.item() * test_images.size(0)
-                test_dice_2 += test_dice_cal2.item() * test_images.size(0)
+                test_dice_2 += test_dice_cal2.item() * test_images.size(0)  
+                
             else:
                 # for img2d, label2d in zip(test_batch['image'],test_batch['label']):
                 for idx in range(test_batch['image'].shape[2]):
@@ -174,7 +226,11 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
                     with torch.cuda.amp.autocast():
                         test_outputs = model(test_images)
                         test_loss_batch = compute_loss(test_outputs, test_labels, criterion, deep_supervision)
-                        test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs, test_labels)
+                        test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs[0] if deep_supervision else test_outputs, test_labels)
+
+                    all_test_images.append(test_images.cpu().numpy())
+                    all_test_labels.append(test_labels.cpu().numpy())
+                    all_test_outputs.append(test_outputs.cpu().numpy()) 
 
                     test_loss += test_loss_batch.item() * test_images.size(0)
                     test_samples += test_images.size(0)
@@ -188,9 +244,15 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
         test_dice_1 /= test_samples
         test_dice_2 /= test_samples
 
-
-
     print(f"Testing Loss: {test_loss:.4f}, Testing Dice 0: {test_dice_0:.4f}, Testing Dice 1: {test_dice_1:.4f}, Testing Dice 2: {test_dice_2:.4f}")
+    i=5
+    savemat(os.path.join(save_path, 'output.mat'), {'all_test_images': all_test_images[:i], 
+                                                    'all_test_labels': all_test_labels[:i],
+                                                    'all_test_outputs': all_test_outputs[:i], 
+                                                    'ds_outs': ds_outputs[:i],
+                                                    'test_loss': test_loss, 'test_dice_0': test_dice_0, 'test_dice_1': test_dice_1, 'test_dice_2': test_dice_2})
+    
+    img_plot(os.path.join(save_path, 'output.mat'), os.path.join(save_path, 'output.png'))
     return {'test_loss': test_loss, 'test_dice_0': test_dice_0, 'test_dice_1': test_dice_1, 'test_dice_2': test_dice_2}
 
 
@@ -204,3 +266,110 @@ def plot_loss(train_loss, val_loss, best_epoch, best_val_loss, save_path='DL_res
     plt.legend()
     plt.savefig(os.path.join(save_path, 'loss.png'))
     plt.show()
+    
+def img_plot(mat_path, img_save_path):
+    data = loadmat(mat_path)
+    orig_imgs, seg, pred = data["all_test_images"], data["all_test_labels"], data["all_test_outputs"]
+
+    # Choose four random indices from the length of the batch
+    indices = np.random.choice(len(orig_imgs), 4, replace=False)
+
+    fig, axs = plt.subplots(4, 7, figsize=(30, 15))  # Create a 4x3 subplot grid
+
+    for i, idx in enumerate(indices):
+        slice_id = np.random.randint(30, 91)
+        # Plotting original image
+        axs[i, 0].imshow(orig_imgs[idx][1,1,slice_id], cmap="gray")
+        axs[i, 0].set_title("Original Image")
+
+        # Plotting segmentation mask
+        axs[i, 1].imshow(seg[idx][1,0,slice_id]>0, cmap="gray")
+        axs[i, 1].set_title("Segmentation Mask (Whole Tumor)")
+
+        # Plotting prediction
+        axs[i, 2].imshow(pred[idx][1,0,slice_id]>0, cmap="gray")
+        axs[i, 2].set_title("Prediction for Whole Tumor Mask")
+        
+        # Plotting segmentation mask
+        axs[i, 3].imshow(((seg[idx][1,0,slice_id]==1) + (seg[idx][1,0,slice_id]==3))>0, cmap="gray")
+        axs[i, 3].set_title("Segmentation Mask (Tumor Core)")
+
+        # Plotting prediction
+        axs[i, 4].imshow(pred[idx][1,1,slice_id]>0, cmap="gray")
+        axs[i, 4].set_title("Prediction for Tumor Core Mask")
+
+        # Plotting segmentation mask
+        axs[i, 5].imshow(seg[idx][1,0,slice_id]==3, cmap="gray")
+        axs[i, 5].set_title("Segmentation Mask (Enhancing Tumor)")
+
+        # Plotting prediction
+        axs[i, 6].imshow(pred[idx][1,2,slice_id]>0, cmap="gray")
+        axs[i, 6].set_title("Prediction for Enhancing Tumor Mask")
+
+    # Hide x and y ticks for all subplots
+    for ax in axs.flatten():
+        ax.axis('off')
+
+    plt.tight_layout()
+    
+    plt.savefig(img_save_path)  
+    
+def img_plot_deep_supervision(mat_path, img_save_path):
+    data = loadmat(mat_path)
+    orig_imgs, seg, pred, ds_outs = data["all_test_images"], data["all_test_labels"], data["all_test_outputs"], data["ds_outs"]
+
+    # Choose four random indices from the length of the batch
+    indices = np.random.choice(len(orig_imgs), 4, replace=False)
+
+    fig, axs = plt.subplots(4, 13, figsize=(45, 10))  # Create a 4x3 subplot grid
+
+    for i, idx in enumerate(indices):
+        slice_id = np.random.randint(30, 91)
+        # Plotting original image
+        axs[i, 0].imshow(orig_imgs[idx][1,1,slice_id], cmap="gray")
+        axs[i, 0].set_title("Original Image")
+
+        # Plotting segmentation mask
+        axs[i, 1].imshow(seg[idx][1,0,slice_id]>0, cmap="gray")
+        axs[i, 1].set_title("Segmentation Mask (Whole Tumor)")
+        
+        # Plotting prediction
+        axs[i, 2].imshow(ds_outs[idx][2][1,0,slice_id]>0, cmap="gray")
+        axs[i, 2].set_title("ds2 for Whole Tumor Mask")
+        axs[i, 3].imshow(ds_outs[idx][1][1,0,slice_id]>0, cmap="gray")
+        axs[i, 3].set_title("ds1 for Whole Tumor Mask")
+        axs[i, 4].imshow(pred[idx][1,0,slice_id]>0, cmap="gray")
+        axs[i, 4].set_title("Prediction for Whole Tumor Mask")
+        
+
+        # Plotting segmentation mask
+        axs[i, 5].imshow(((seg[idx][1,0,slice_id]==1) + (seg[idx][1,0,slice_id]==3))>0, cmap="gray")
+        axs[i, 5].set_title("Segmentation Mask (Tumor Core)")
+
+        # Plotting prediction
+        axs[i, 6].imshow(ds_outs[idx][2][1,1,slice_id]>0, cmap="gray")
+        axs[i, 6].set_title("ds2 for Whole Tumor Mask")
+        axs[i, 7].imshow(ds_outs[idx][1][1,1,slice_id]>0, cmap="gray")
+        axs[i, 7].set_title("ds1 for Whole Tumor Mask")
+        axs[i, 8].imshow(pred[idx][1,1,slice_id]>0, cmap="gray")
+        axs[i, 8].set_title("Prediction for Whole Tumor Mask")
+
+        # Plotting segmentation mask
+        axs[i, 9].imshow(seg[idx][1,0,slice_id]==3, cmap="gray")
+        axs[i, 9].set_title("Segmentation Mask (Enhancing Tumor)")
+
+        # Plotting prediction
+        axs[i, 10].imshow(ds_outs[idx][2][1,2,slice_id]>0, cmap="gray")
+        axs[i, 10].set_title("ds2 for Whole Tumor Mask")
+        axs[i, 11].imshow(ds_outs[idx][1][1,2,slice_id]>0, cmap="gray")
+        axs[i, 11].set_title("ds1 for Whole Tumor Mask")
+        axs[i, 12].imshow(pred[idx][1,2,slice_id]>0, cmap="gray")
+        axs[i, 12].set_title("Prediction for Whole Tumor Mask")
+
+    # Hide x and y ticks for all subplots
+    for ax in axs.flatten():
+        ax.axis('off')
+
+    plt.tight_layout()
+    
+    plt.savefig(img_save_path) 

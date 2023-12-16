@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class conv_block(nn.Module):
+    """
+    Convolution Block
+    """
     def __init__(self,ch_in,ch_out,inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
         super(conv_block,self).__init__()
         self.conv = nn.Sequential(
@@ -20,6 +23,9 @@ class conv_block(nn.Module):
         return x
 
 class up_conv(nn.Module):
+    """
+    Up Convolution Block
+    """
     def __init__(self,ch_in,ch_out, inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
         super(up_conv,self).__init__()
         self.up = nn.Sequential(
@@ -34,6 +40,13 @@ class up_conv(nn.Module):
         return x
 
 class Attention_block(nn.Module):
+    """
+    Attention Block
+    input:
+        F_g: the channel of g
+        F_l: the channel of x
+        F_int: the channel after conv
+    """
     def __init__(self,F_g,F_l,F_int):
         super(Attention_block,self).__init__()
         self.W_g = nn.Sequential(
@@ -63,6 +76,9 @@ class Attention_block(nn.Module):
         return x*psi
     
 class conv3d_block(nn.Module):
+    """
+    3D Convolution Block
+    """
     def __init__(self, ch_in, ch_out, inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
         super(conv3d_block, self).__init__()
         self.conv = nn.Sequential(
@@ -79,6 +95,9 @@ class conv3d_block(nn.Module):
         return x
 
 class up_conv3d(nn.Module):
+    """
+    3D Up Convolution Block
+    """
     def __init__(self, ch_in, ch_out, inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
         super(up_conv3d, self).__init__()
         self.up = nn.Sequential(
@@ -93,6 +112,13 @@ class up_conv3d(nn.Module):
         return x
 
 class Attention_block3d(nn.Module):
+    """
+    3D Attention Block
+    input:
+        F_g: the channel of g
+        F_l: the channel of x
+        F_int: the channel after conv
+    """
     def __init__(self, F_g, F_l, F_int):
         super(Attention_block3d, self).__init__()
         self.W_g = nn.Sequential(
@@ -122,8 +148,23 @@ class Attention_block3d(nn.Module):
         return x * psi
 
 class U_Net(nn.Module):
-    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, kernels=(64, 128, 256, 512, 1024), inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
+    """
+    It is a U-Net model with deep supervision.
+    It can be used for both 2D and 3D images.
+    It can be used for various kernel sizes, activation functions, and normalization.
+    """
+    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, 
+                 kernels=(64, 128, 256, 512, 1024), 
+                 inst=True, act=nn.LeakyReLU(0.2, inplace=True), 
+                 deep_supervision=False, n_ds=2,
+                 n_bottleneck=0):
         super(U_Net, self).__init__()
+
+        self.spat_dim = spat_dim
+        self.deep_supervision = deep_supervision
+        self.n_ds = n_ds
+        self.n_bottleneck = n_bottleneck
+        assert isinstance(n_bottleneck, int) and n_bottleneck >= 0, "n_bottleneck should be a non-negative integer"
 
         if spat_dim == 2:
             conv_block_class = conv_block
@@ -150,9 +191,22 @@ class U_Net(nn.Module):
         # Create decoder layers
         for i in range(len(kernels) - 1, 0, -1):
             self.up_layers.append(up_conv_class(kernels[i], kernels[i - 1], inst=inst, act=act))
-            self.decoder_convs.append(conv_block_class(kernels[i], kernels[i - 1], inst=inst, act=act))
+            self.decoder_convs.append(conv_block_class(kernels[i-1]*2, kernels[i - 1], inst=inst, act=act))
+            
+        if self.n_bottleneck > 0:
+            self.bottleneck_convs = nn.ModuleList()
+            for _ in range(n_bottleneck):
+                self.bottleneck_convs.append(conv_block_class(kernels[-1], kernels[-1], inst=inst, act=act))
 
         self.max_pool = max_pool
+
+        if self.deep_supervision:
+            self.dsv_layers = nn.ModuleList()
+            for i in reversed(range(self.n_ds)):
+                if self.spat_dim == 2:
+                    self.dsv_layers.append(nn.Conv2d(kernels[i], output_ch, kernel_size=1))
+                elif self.spat_dim == 3:
+                    self.dsv_layers.append(nn.Conv3d(kernels[i], output_ch, kernel_size=1))
 
     def forward(self, x):
         enc_outputs = []
@@ -162,23 +216,52 @@ class U_Net(nn.Module):
             enc_outputs.append(x)
             if (i + 1) != len(self.encoder_convs):
                 x = self.max_pool(x)
+        
+        if self.n_bottleneck > 0:
+            for bottleneck_conv in self.bottleneck_convs:
+                x = bottleneck_conv(x)
 
         # Decoding path
+        dsv_outputs = []
         for i, (up, dec_conv) in enumerate(zip(self.up_layers, self.decoder_convs)):
             x = up(x)
             x = torch.cat((enc_outputs[-(i + 2)], x), dim=1)
             x = dec_conv(x)
+            if self.deep_supervision and i > (len(self.up_layers) - 1 - self.n_ds):
+                dsv_outputs.append(self.dsv_layers[i-len(self.up_layers)+self.n_ds](x))
+
+        d1 = self.Conv_1x1(x)
+        if self.deep_supervision:
+            dsv_outs = [d1,]
+            for dsv_out in dsv_outputs:
+                if self.spat_dim == 3:
+                    dsv_outs.append(nn.functional.interpolate(dsv_out, d1.shape[2:], mode="trilinear", align_corners=True))
+                elif self.spat_dim == 2:
+                    dsv_outs.append(nn.functional.interpolate(dsv_out, d1.shape[2:], mode="bilinear", align_corners=True))
+            return dsv_outs
+
 
         d1 = self.Conv_1x1(x)
         return d1
                 
 class AttU_Net(nn.Module):
-    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, kernels=(64, 128, 256, 512, 1024), inst=True, act=nn.LeakyReLU(0.2, inplace=True), deep_supervision=False, n_ds=2):
+    """
+    It is a U-Net model with attention blocks and deep supervision.
+    It can be used for both 2D and 3D images.
+    It can be used for various kernel sizes, activation functions, and normalization.
+    """
+    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, 
+                 kernels=(64, 128, 256, 512, 1024), 
+                 inst=True, act=nn.LeakyReLU(0.2, inplace=True), 
+                 deep_supervision=False, n_ds=2,
+                 n_bottleneck=0):
         super(AttU_Net, self).__init__()
         
         self.spat_dim = spat_dim
         self.deep_supervision = deep_supervision
         self.n_ds = n_ds
+        self.n_bottleneck = n_bottleneck
+        assert isinstance(n_bottleneck, int) and n_bottleneck >= 0, "n_bottleneck should be a non-negative integer"
         
         if spat_dim == 2:
             conv_block_class = conv_block
@@ -210,7 +293,12 @@ class AttU_Net(nn.Module):
         # Create decoder layers and up layers
         for i in range(len(kernels) - 1, 0, -1):
             self.up_layers.append(up_conv_class(kernels[i], kernels[i - 1], inst=inst, act=act))
-            self.decoder_convs.append(conv_block_class(kernels[i], kernels[i - 1], inst=inst, act=act))
+            self.decoder_convs.append(conv_block_class(kernels[i-1]*2, kernels[i - 1], inst=inst, act=act))
+
+        if n_bottleneck > 0:
+            self.bottleneck_convs = nn.ModuleList()
+            for _ in range(n_bottleneck):
+                self.bottleneck_convs.append(conv_block_class(kernels[-1], kernels[-1], inst=inst, act=act))
 
         self.max_pool = max_pool
         self.sigmoid = nn.Sigmoid()
@@ -232,6 +320,10 @@ class AttU_Net(nn.Module):
             if len(enc_outputs) != len(self.encoder_convs):
                 x = self.max_pool(x)
 
+        if self.n_bottleneck > 0:
+            for bottleneck_conv in self.bottleneck_convs:
+                x = bottleneck_conv(x)
+
         # Decoding path
         dsv_outputs = []
         for i, (up, dec_conv) in enumerate(zip(self.up_layers, self.decoder_convs)):
@@ -241,7 +333,6 @@ class AttU_Net(nn.Module):
             x = torch.cat((enc_outputs[-(i + 2)], x), dim=1)
             x = dec_conv(x)
             if self.deep_supervision and i > (len(self.up_layers) - 1 - self.n_ds):
-                print("dsv yeah", i, len(self.up_layers) - 1 - self.n_ds, x.shape)
                 dsv_outputs.append(self.dsv_layers[i-len(self.up_layers)+self.n_ds](x))
 
         d1 = self.Conv_1x1(x)

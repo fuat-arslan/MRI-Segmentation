@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This code is adapted from:
+https://github.com/NVIDIA/DeepLearningExamples/blob/master/PyTorch/Segmentation/nnUNet/data_loading/data_module.py
+"""
+
 import glob
 import os
 
@@ -70,6 +75,10 @@ class DataModule(LightningDataModule):
     def train_dataloader(self):
         return fetch_dali_loader(self.train_imgs, self.train_lbls, self.args.batch_size, "train", **self.kwargs)
 
+    # Important Remark: since we couldnt manage the prediction case, the val data loader is  
+    # passed through the train pipeline too. This doesnt mean that there is a data leakage. It 
+    # only means that data augmentation is applied to validation data as well. But the validation 
+    # and train dataset are completely different. 
     def val_dataloader(self):
         return fetch_dali_loader(self.val_imgs, self.val_lbls, 2, "train", **self.kwargs)
 
