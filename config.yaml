@@ -1,19 +1,32 @@
+<<<<<<< HEAD
 # Description: Configuration file for training and testing
 
 model_name: "unet_nods_nobottle_ourkernel"
 model_type: "unet"
 dimension: 2
+=======
+model_name: "my_model_Att_ourbest_kernels"
+model_type: "attunet"
+dimension: 3
+>>>>>>> 274ab5c3c134b6b3a365910f2b1241d575cb05db
 in_channels: 4
 out_channels: 3
 kernels: [32, 64, 128, 256, 512] # 64, 96, 128, 192, 256, 384, 512 # 32, 64, 128, 256, 512
 batch_size: 4
+<<<<<<< HEAD
 epochs: 40
 learning_rate: 0.0003
 deep_supervision: False
+=======
+epochs: 70
+learning_rate: 0.0003
+deep_supervision: True
+>>>>>>> 274ab5c3c134b6b3a365910f2b1241d575cb05db
 deep_supervision_head: 2
 instance_norm: True
 activation: "leakyrelu"
 focal: True
+<<<<<<< HEAD
 n_bottleneck: 0
 device: "cuda:2"
 weight_decay: 0
@@ -30,3 +43,15 @@ gpus: 1
 task: 11
 num_workers: 16
 nfolds: 5
+=======
+device: "cuda:1"
+weight_decay: 0
+results_dir: "results2"
+overwrite: True
+delete_prev_ckpts: True
+data_path: '/auto/data2/myilmaz/DL_Project/BraTS2021_Preprocessed/11_3d_2'
+brats: True
+fold: 0
+task: 11
+num_workers: 16
+>>>>>>> 274ab5c3c134b6b3a365910f2b1241d575cb05db

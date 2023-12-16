@@ -6,6 +6,7 @@ https://github.com/NVIDIA/DeepLearningExamples/blob/master/PyTorch/Segmentation/
 import torch
 import torch.nn as nn
 from monai.losses import DiceLoss, FocalLoss
+import numpy as np
 
 
 def compute_loss(preds, label, criterion, deep_supervision=False):
@@ -42,4 +43,9 @@ class DiceCoeff(nn.Module):
         y_wt, y_tc, y_et = y > 0, ((y == 1) + (y == 3)) > 0, y == 3
         p_wt, p_tc, p_et = pred[:, 0].unsqueeze(1), pred[:, 1].unsqueeze(1), pred[:, 2].unsqueeze(1)   
         l_wt, l_tc, l_et = self.dice(p_wt, y_wt), self.dice(p_tc, y_tc), self.dice(p_et, y_et)
+<<<<<<< HEAD
         return (1-l_wt), (1-l_tc), (1-l_et)
+=======
+
+        return np.array([(1-l_wt).cpu(), (1-l_tc).cpu(), (1-l_et).cpu()])
+>>>>>>> 274ab5c3c134b6b3a365910f2b1241d575cb05db

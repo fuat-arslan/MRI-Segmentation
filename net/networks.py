@@ -148,23 +148,8 @@ class Attention_block3d(nn.Module):
         return x * psi
 
 class U_Net(nn.Module):
-    """
-    It is a U-Net model with deep supervision.
-    It can be used for both 2D and 3D images.
-    It can be used for various kernel sizes, activation functions, and normalization.
-    """
-    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, 
-                 kernels=(64, 128, 256, 512, 1024), 
-                 inst=True, act=nn.LeakyReLU(0.2, inplace=True), 
-                 deep_supervision=False, n_ds=2,
-                 n_bottleneck=0):
+    def __init__(self, spat_dim=2, img_ch=3, output_ch=1, kernels=(64, 128, 256, 512, 1024), inst=True, act=nn.LeakyReLU(0.2, inplace=True)):
         super(U_Net, self).__init__()
-
-        self.spat_dim = spat_dim
-        self.deep_supervision = deep_supervision
-        self.n_ds = n_ds
-        self.n_bottleneck = n_bottleneck
-        assert isinstance(n_bottleneck, int) and n_bottleneck >= 0, "n_bottleneck should be a non-negative integer"
 
         if spat_dim == 2:
             conv_block_class = conv_block
@@ -191,14 +176,18 @@ class U_Net(nn.Module):
         # Create decoder layers
         for i in range(len(kernels) - 1, 0, -1):
             self.up_layers.append(up_conv_class(kernels[i], kernels[i - 1], inst=inst, act=act))
-            self.decoder_convs.append(conv_block_class(kernels[i-1]*2, kernels[i - 1], inst=inst, act=act))
-            
-        if self.n_bottleneck > 0:
-            self.bottleneck_convs = nn.ModuleList()
-            for _ in range(n_bottleneck):
-                self.bottleneck_convs.append(conv_block_class(kernels[-1], kernels[-1], inst=inst, act=act))
+            self.decoder_convs.append(conv_block_class(kernels[i], kernels[i - 1], inst=inst, act=act))
 
         self.max_pool = max_pool
+
+        if self.deep_supervision:
+            self.dsv_layers = nn.ModuleList()
+            for i in reversed(range(self.n_ds)):
+                if self.spat_dim == 2:
+                    self.dsv_layers.append(nn.Conv2d(kernels[i], output_ch, kernel_size=1))
+                elif self.spat_dim == 3:
+                    self.dsv_layers.append(nn.Conv3d(kernels[i], output_ch, kernel_size=1))
+
 
         if self.deep_supervision:
             self.dsv_layers = nn.ModuleList()
@@ -293,12 +282,7 @@ class AttU_Net(nn.Module):
         # Create decoder layers and up layers
         for i in range(len(kernels) - 1, 0, -1):
             self.up_layers.append(up_conv_class(kernels[i], kernels[i - 1], inst=inst, act=act))
-            self.decoder_convs.append(conv_block_class(kernels[i-1]*2, kernels[i - 1], inst=inst, act=act))
-
-        if n_bottleneck > 0:
-            self.bottleneck_convs = nn.ModuleList()
-            for _ in range(n_bottleneck):
-                self.bottleneck_convs.append(conv_block_class(kernels[-1], kernels[-1], inst=inst, act=act))
+            self.decoder_convs.append(conv_block_class(kernels[i], kernels[i - 1], inst=inst, act=act))
 
         self.max_pool = max_pool
         self.sigmoid = nn.Sigmoid()

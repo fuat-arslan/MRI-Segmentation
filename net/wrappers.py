@@ -2,36 +2,16 @@ import torch
 import os
 import numpy as np
 from tqdm import tqdm
-from scipy.io import savemat, loadmat
-from net.loss import DiceCoeff, LossBraTS, compute_loss
+from DL_Project_Generic.loss import DiceCoeff, LossBraTS, compute_loss
 import matplotlib.pyplot as plt
 
 def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
-             best_model_path='DL_results', dim3d=False, deep_supervision=False, device='cuda:0', amp=True):
-    
-    """
-    Function to train the model for num_epochs epochs.
-    inputs:
-        num_epochs: Number of epochs to train the model for
-        train_loader: Training data loader
-        val_loader: Validation data loader
-        model: The model to be trained
-        optimizer: Optimizer to use for training
-        criterion: Loss function
-        best_model_path: Path to save the best model
-        dim3d: If True, train in 3D, else train in 2D
-        deep_supervision: If True, use deep supervision
-        device: Device to use for training
-        amp: If True, use automatic mixed precision
-    outputs:
-        A dictionary containing the model, training loss, validation loss, best epoch, best validation loss and optimizer state dict
+             best_model_path='DL_results', dim3d=False, deep_supervision=False, device='cuda:0'):
 
-    It saves the best model in the best_model_path directory.
-    """
 
-    best_model_save_path = ""
     best_val_loss = float('inf')  # Initialize with a high value
     best_epoch = -1
+    best_model_filename = ""
     scaler = torch.cuda.amp.GradScaler()
     train_loss_list = []
     val_loss_list = []
@@ -111,7 +91,7 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                     with torch.cuda.amp.autocast():
                         val_outputs = model(val_images)
                         val_loss_batch = compute_loss(val_outputs, val_labels, criterion, deep_supervision)
-                        val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs[0] if deep_supervision else val_outputs, val_labels)
+                        val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs, val_labels)
 
                     val_loss += val_loss_batch.item() * val_images.size(0)
                     val_samples += val_images.size(0)
@@ -127,7 +107,7 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                         with torch.cuda.amp.autocast(enabled=amp):
                             val_outputs = model(val_images)
                             val_loss_batch = compute_loss(val_outputs, val_labels, criterion, deep_supervision)
-                            val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs[0] if deep_supervision else val_outputs, val_labels)
+                            val_dice_cal0, val_dice_cal1, val_dice_cal2 = DiceCoeff()(val_outputs, val_labels)
 
 
                         val_loss += val_loss_batch.item() * val_images.size(0)
@@ -156,7 +136,12 @@ def trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
                 os.remove(best_model_save_path)
             best_model_save_path = os.path.join(best_model_path, f"best_model_{epoch + 1}_loss_{best_val_loss:.4f}.pth")
             print(f"Model saved at Epoch {best_epoch} with Validation Loss: {best_val_loss:.4f}")
-        
+            # Delete the previous best model if it exists
+            if best_model_filename and os.path.exists(best_model_filename) and delete_previous_best:
+                os.remove(best_model_filename)
+                print(f"Deleted previous best model: {best_model_filename}")
+            best_model_filename = os.path.join(best_model_path, f"best_model_{epoch + 1}_loss_{best_val_loss:.4f}.pth")
+
 
     print(f"Training completed. Best Validation Loss: {best_val_loss:.4f} at Epoch {best_epoch}")
     return {'model': model, 'train_loss': train_loss_list, 'val_loss': val_loss_list,
@@ -200,16 +185,7 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
                 with torch.cuda.amp.autocast():
                     test_outputs = model(test_images)
                     test_loss_batch = compute_loss(test_outputs, test_labels, criterion, deep_supervision)
-                    test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs[0] if deep_supervision else test_outputs, test_labels)
-
-                all_test_images.append(test_images.cpu().numpy())
-                all_test_labels.append(test_labels.cpu().numpy())
-                temp = test_outputs[0] if deep_supervision else test_outputs
-                all_test_outputs.append(temp.cpu().numpy()) 
-                
-                if deep_supervision:
-                    print(type(test_outputs))
-                    ds_outputs.append([out.cpu().numpy() for out in test_outputs])
+                    test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs, test_labels)
 
                 test_loss += test_loss_batch.item() * test_images.size(0)
                 test_samples += test_images.size(0)
@@ -226,11 +202,7 @@ def tester(test_loader, model, criterion, device='cuda:0', dim3d=False, deep_sup
                     with torch.cuda.amp.autocast():
                         test_outputs = model(test_images)
                         test_loss_batch = compute_loss(test_outputs, test_labels, criterion, deep_supervision)
-                        test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs[0] if deep_supervision else test_outputs, test_labels)
-
-                    all_test_images.append(test_images.cpu().numpy())
-                    all_test_labels.append(test_labels.cpu().numpy())
-                    all_test_outputs.append(test_outputs.cpu().numpy()) 
+                        test_dice_cal0, test_dice_cal1, test_dice_cal2 = DiceCoeff()(test_outputs, test_labels)
 
                     test_loss += test_loss_batch.item() * test_images.size(0)
                     test_samples += test_images.size(0)

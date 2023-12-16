@@ -12,8 +12,11 @@ from data_loading.data_module import DataModule
 
 from net.loss import compute_loss, LossBraTS
 from net.wrappers import trainer
-from net.networks import U_Net, AttU_Net
-from net.utils import add_config
+from net.networks import U_Net
+from net.utils import add_config, get_activation_function, print_activation_functions
+
+
+
 
 def train(args,model_path):
     data_module = DataModule(args)
@@ -31,16 +34,11 @@ def train(args,model_path):
     activation = nn.ReLU() if args.model_params.activation == "relu" else nn.LeakyReLU(0.02, inplace=False)
 
     #Get model from args
-    model_class = U_Net if args.model_params.model_type == "unet" else AttU_Net
-    print(args.model_params.model_type == "unet")
-    model = model_class(args.model_params.dimension,args.model_params.in_channels,
+    model = U_Net(args.model_params.dimension,args.model_params.in_channels,
                 args.model_params.out_channels,
                     args.model_params.kernels,
                     args.model_params.instance_norm,
-                    activation,
-                    args.model_params.deep_supervision,
-                    args.model_params.deep_supervision_head,
-                    args.model_params.n_bottleneck
+                    activation
                 ).to(device)
 
 
@@ -54,8 +52,8 @@ def train(args,model_path):
     optimizer = optim.NAdam(model.parameters(), lr=args.model_params.learning_rate, weight_decay=args.model_params.weight_decay)
 
     output_dict = trainer(num_epochs, train_loader, val_loader, model, optimizer, criterion,
-                        dim3d=True if args.model_params.dimension == 3 else False, deep_supervision=deep_supervision, device=device,
-                        best_model_path=model_path, amp=args.model_params.amp)
+                        dim3d=False, deep_supervision=deep_supervision, device=device,
+                        best_model_path=model_path)
 
     #save output dict
     torch.save(output_dict, os.path.join(model_path, "output_dict.pt"))
