@@ -30,9 +30,9 @@ cd MRI-Segmentation
 python train.py --model_config config.yaml 
 ```
 ## Test
-
+```
 python test.py --model_config path/to/config.yaml 
-
+```
 Put the config.yaml to the folder of the model for testing. Arange the test data path in the config.yaml file according to your data path.
 
 ## Sample Output Visualization
